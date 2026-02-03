@@ -1,0 +1,99 @@
+# CloudFormation Template Format Version
+AWSTemplateFormatVersion: "2010-09-09"
+
+# Template purpose
+Description: >
+  Creates two public subnets in an existing VPC, attaches an Internet Gateway,
+  and associates a public route table for internet access.
+
+# Parameters let you override values at deploy time
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-0cd0bf56666db3063
+    Description: Existing VPC ID
+
+Resources:
+  # Internet Gateway provides outbound internet access for the VPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: igw-public
+
+  # Attach the IGW to the target VPC
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VpcId
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public subnet in us-east-1a
+  PublicSubnet1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: 10.10.3.0/24
+      AvailabilityZone: us-east-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: public-subnet-1a
+
+  # Public subnet in us-east-1b
+  PublicSubnet1b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: 10.10.30.0/24
+      AvailabilityZone: us-east-1b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: public-subnet-1b
+
+  # Public route table for internet-bound traffic
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: rtb-public
+
+  # Default route to the Internet Gateway
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Associate public subnets with the public route table
+  PublicSubnet1aRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1a
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet1bRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1b
+      RouteTableId: !Ref PublicRouteTable
+
+# Outputs make key resources easy to retrieve
+Outputs:
+  PublicSubnet1aId:
+    Description: Subnet ID for public-subnet-1a
+    Value: !Ref PublicSubnet1a
+
+  PublicSubnet1bId:
+    Description: Subnet ID for public-subnet-1b
+    Value: !Ref PublicSubnet1b
+
+  PublicRouteTableId:
+    Description: Public route table ID
+    Value: !Ref PublicRouteTable

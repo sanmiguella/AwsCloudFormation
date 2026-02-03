@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Create two private subnets in an existing VPC (us-east-1).
+  Subnets are tagged with names and do not auto-assign public IPs.
+
+Resources:
+  PrivateSubnet1A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      # Target VPC for the subnet
+      VpcId: vpc-0cd0bf56666db3063
+      # CIDR block for the subnet
+      CidrBlock: 10.10.13.0/24
+      # Availability Zone
+      AvailabilityZone: us-east-1a
+      # Do not auto-assign public IPs (private subnet behavior)
+      MapPublicIpOnLaunch: false
+      # Name tag
+      Tags:
+        - Key: Name
+          Value: private-subnet-1a
+
+  PrivateSubnet1B:
+    Type: AWS::EC2::Subnet
+    Properties:
+      # Target VPC for the subnet
+      VpcId: vpc-0cd0bf56666db3063
+      # CIDR block for the subnet
+      CidrBlock: 10.10.23.0/24
+      # Availability Zone
+      AvailabilityZone: us-east-1b
+      # Do not auto-assign public IPs (private subnet behavior)
+      MapPublicIpOnLaunch: false
+      # Name tag
+      Tags:
+        - Key: Name
+          Value: private-subnet-1b
+
+Outputs:
+  PrivateSubnet1AId:
+    Description: ID of the private subnet in us-east-1a
+    Value: !Ref PrivateSubnet1A
+  PrivateSubnet1BId:
+    Description: ID of the private subnet in us-east-1b
+    Value: !Ref PrivateSubnet1B

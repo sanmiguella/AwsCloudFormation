@@ -1,0 +1,62 @@
+# CloudFormation Template Format Version
+# This declares we're using the 2010-09-09 spec (still the most common & stable)
+AWSTemplateFormatVersion: "2010-09-09"
+
+# Human-readable description shown in AWS Console + CLI
+# Helps when you're scanning dozens of stacks later
+Description: >
+  Creates a single VPC named "labnetwork" with a configurable CIDR block.
+  Matches the behavior of the original boto3 script:
+  - Sets DNS support + DNS hostnames to true
+  - Applies Name tag = "labnetwork"
+  Perfect for lab / learning / isolated testing environments.
+
+# Parameters section – lets you customize without editing the template
+Parameters:
+  CidrBlock:
+    Type: String
+    Default: "10.10.0.0/16"
+    Description: >
+      The IPv4 CIDR block for the VPC (e.g. 10.10.0.0/16 gives you ~65k addresses).
+      Keep it private-range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) unless you have a good reason.
+    AllowedPattern: '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})$'
+    ConstraintDescription: "Must be a valid CIDR notation (example: 10.10.0.0/16)"
+
+# Resources – the actual infrastructure pieces we want created
+Resources:
+  # The VPC itself
+  LabVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      # The network range – pulled from parameter or defaults to 10.10.0.0/16
+      CidrBlock: !Ref CidrBlock
+      
+      # Enable DNS resolution inside the VPC
+      # Without this → instances can't resolve public domains or each other by private DNS name
+      EnableDnsSupport: true
+      
+      # Assign DNS hostnames to instances automatically
+      # Without this → instances get IP addresses but no .compute.internal hostname
+      EnableDnsHostnames: true
+      
+      # Tags – only adding Name here to match your boto3 script
+      # You can add more later (Environment, Owner, Project, etc.)
+      Tags:
+        - Key: Name
+          Value: labnetwork
+
+# Outputs – values you can easily reference later (CLI, console, other stacks)
+Outputs:
+  VpcId:
+    Description: The AWS-generated ID of the new VPC (e.g. vpc-0a1b2c3d4e5f6g7h8)
+    Value: !Ref LabVPC
+    
+    # Export makes this value usable by other stacks via Fn::ImportValue
+    # Useful if you later want to attach subnets, security groups, etc. in separate templates
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+
+  # Bonus: output the CIDR you actually used (handy for documentation / verification)
+  VpcCidr:
+    Description: The CIDR block that was applied to the VPC
+    Value: !Ref CidrBlock

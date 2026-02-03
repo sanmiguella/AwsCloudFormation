@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Create one Ubuntu t2.micro instance with a public IP and allow SSH/HTTP
+  from the public internet.
+
+Resources:
+  # Security group that allows inbound SSH (22) and HTTP (80) from anywhere.
+  PublicWebSshSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      # Short description shown in the EC2 console.
+      GroupDescription: Allow SSH (22) and HTTP (80) from anywhere
+      # Attach the security group to the target VPC.
+      VpcId: vpc-0cd0bf56666db3063
+      SecurityGroupIngress:
+        # SSH access from the public internet.
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        # HTTP access from the public internet.
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        # Allow all outbound traffic (typical default).
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        # Name tag for easier identification.
+        - Key: Name
+          Value: public-web-ssh-security-group
+
+  # EC2 instance placed in the specified public subnet with a public IP.
+  Ec2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      # Key pair name used for SSH login.
+      KeyName: vockey
+      # Instance size (same as Python script default).
+      InstanceType: t2.micro
+      # Ubuntu AMI ID for us-east-1.
+      ImageId: ami-0b6c6ebed2801a5cb
+      # Use a network interface to enable AssociatePublicIpAddress.
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          # Subnet where the instance will be created.
+          SubnetId: subnet-0c4e050257c697cca
+          # Attach the security group created above.
+          GroupSet:
+            - !Ref PublicWebSshSG
+          # Ensure the instance gets a public IP.
+          AssociatePublicIpAddress: true
+      Tags:
+        # Name tag for the instance.
+        - Key: Name
+          Value: lab-ec2-ubuntu-webserver
+
+Outputs:
+  # Instance ID output for quick reference after deployment.
+  InstanceId:
+    Description: ID of the created EC2 instance
+    Value: !Ref Ec2Instance
+  # Security group ID output for reference.
+  SecurityGroupId:
+    Description: Security group allowing SSH/HTTP from the public internet
+    Value: !Ref PublicWebSshSG

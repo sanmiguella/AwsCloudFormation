@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+# Creates a private MariaDB RDS instance in existing private subnets.
+Description: >
+  Create a private MariaDB RDS instance in the provided private subnets,
+  with a security group allowing MySQL/MariaDB access from 10.10.0.0/16.
+
+Resources:
+  # Security group dedicated to the RDS instance.
+  RdsPrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      # Short description shown in the EC2 console.
+      GroupDescription: Allow MariaDB access from 10.10.0.0/16
+      # Attach the security group to the target VPC.
+      VpcId: vpc-0cd0bf56666db3063
+      SecurityGroupIngress:
+        # Allow MySQL/MariaDB traffic from the specified CIDR.
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.10.0.0/16
+      SecurityGroupEgress:
+        # Allow all outbound traffic (typical default).
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        # Name tag for easier identification.
+        - Key: Name
+          Value: rds-private-sg
+
+  # Subnet group that limits the DB to the two private subnets.
+  RdsSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      # Friendly description shown in the RDS console.
+      DBSubnetGroupDescription: Private subnets for RDS
+      # Private subnet IDs provided by the user.
+      SubnetIds:
+        - subnet-0f86b1a837e9eb07e
+        - subnet-07b2bf9520f8c7781
+      Tags:
+        # Name tag for easier identification.
+        - Key: Name
+          Value: rds-private-subnet-group
+
+  # MariaDB RDS instance using the subnet group and security group above.
+  RdsInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      # Unique DB instance identifier.
+      DBInstanceIdentifier: STUDENTS
+      # Database engine configuration.
+      Engine: mariadb
+      EngineVersion: "10.6.19"
+      # Instance size and storage settings.
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      # Master credentials (as provided).
+      MasterUsername: nodeapp
+      MasterUserPassword: YourPwHerePleaseChange
+      # Place the instance in the private subnet group.
+      DBSubnetGroupName: !Ref RdsSubnetGroup
+      # Attach the DB security group.
+      VPCSecurityGroups:
+        - !Ref RdsPrivateSecurityGroup
+      # Keep the database private (no public endpoint).
+      PubliclyAccessible: false
+      # Disable backups for lab use.
+      BackupRetentionPeriod: 0
+      # Single-AZ deployment.
+      MultiAZ: false
+      # General-purpose SSD storage.
+      StorageType: gp2
+      Tags:
+        # Name tag for easier identification.
+        - Key: Name
+          Value: students-rds-mariadb-instance
+
+Outputs:
+  # DB instance ID for quick reference after deployment.
+  DbInstanceId:
+    Description: ID of the RDS instance
+    Value: !Ref RdsInstance
+  # DB endpoint address for application configuration.
+  DbEndpointAddress:
+    Description: RDS endpoint address
+    Value: !GetAtt RdsInstance.Endpoint.Address
+  # Security group ID output for reference.
+  SecurityGroupId:
+    Description: Security group allowing MariaDB access from 10.10.0.0/16
+    Value: !Ref RdsPrivateSecurityGroup

@@ -1,0 +1,207 @@
+# ============================================================================
+# CloudFormation Template: Lambda + Function URL for Coffee Partners API
+# ============================================================================
+# Purpose: 
+#   Deploys a Node.js Lambda function running in a private VPC subnet, 
+#   connected to your existing RDS MariaDB via Secrets Manager.
+#   Exposes it publicly via Lambda Function URL (no API Gateway needed).
+#   Designed for dev/testing phase in AWS Learner Lab.
+#
+# Current phase notes:
+#   - Uses Function URL with public access (AuthType: NONE + wildcard permission)
+#   - CORS set to '*' to allow testing from EC2 (98.90.252.251) or browser
+#   - When moving to ALB + ASG later: remove LambdaFunctionUrl, Permission, and Cors block
+#
+# Architecture flow:
+#   Browser/EC2 → HTTPS Function URL → Lambda (VPC) → Secrets Manager (creds) → RDS
+#
+# Prerequisites (already done in your lab):
+#   - VPC + private subnets created
+#   - RDS instance + security group allowing 3306 from Lambda SG
+#   - Secrets Manager secret with DB creds
+#   - S3 bucket with function.zip uploaded
+#   - LabRole IAM role with necessary permissions (Lambda execution + SecretsManager read)
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda Function with Function URL - Coffee Partners API (VPC + RDS)
+
+# ============================================================================
+# PARAMETERS
+# ============================================================================
+# These are your lab-specific values — all defaults match your setup exactly.
+# You can override them at deploy time with --parameter-overrides if needed.
+
+Parameters:
+  VpcId:
+    Type: String
+    Default: vpc-0cd0bf56666db3063
+    Description: VPC ID where Lambda will run (labnetwork)
+
+  PrivateSubnet1:
+    Type: String
+    Default: subnet-0f86b1a837e9eb07e
+    Description: Private Subnet in AZ 1a (for Lambda high availability)
+
+  PrivateSubnet2:
+    Type: String
+    Default: subnet-07b2bf9520f8c7781
+    Description: Private Subnet in AZ 1b (for redundancy across AZs)
+
+  SecretsManagerSecretArn:
+    Type: String
+    Default: arn:aws:secretsmanager:us-east-1:289186799422:secret:Mydbsecret-IlaeSs
+    Description: ARN of Secrets Manager secret containing RDS credentials (host, user, pass, db name)
+
+  S3BucketName:
+    Type: String
+    Default: coffee-partners-lambda-289186799422
+    Description: Existing S3 bucket name where function.zip is stored
+
+# ============================================================================
+# RESOURCES
+# ============================================================================
+
+Resources:
+
+  # --------------------------------------------------------------------------
+  # Lambda Execution Security Group
+  # --------------------------------------------------------------------------
+  # Controls outbound traffic from Lambda.
+  # Lambda in VPC needs this SG to reach RDS, Secrets Manager, etc.
+  # Inbound rules not needed — Lambda doesn't receive direct inbound traffic.
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group attached to Coffee Partners Lambda function
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1               # -1 = all protocols (TCP/UDP/ICMP)
+          CidrIp: 0.0.0.0/0            # Allow outbound to anywhere (common for Lambda)
+      Tags:
+        - Key: Name
+          Value: coffee-partners-lambda-sg
+
+  # --------------------------------------------------------------------------
+  # RDS Ingress Rule (modifies EXISTING RDS security group)
+  # --------------------------------------------------------------------------
+  # Adds permission for Lambda's security group to connect to RDS on port 3306.
+  # Without this, Lambda can't reach the database even if in same VPC.
+
+  RDSSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: sg-0f17bc63a39dffc5c           # Your existing RDS security group ID
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup   # Only Lambda SG can connect
+
+  # --------------------------------------------------------------------------
+  # Lambda Function
+  # --------------------------------------------------------------------------
+  # The core compute resource — runs your Node.js Express app.
+  # Deployed from S3 zip, uses existing LabRole, placed in private subnets.
+
+  CoffeePartnersLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs18.x
+      Handler: lambda.handler                     # Entry point: exports.handler in your code
+      Role: arn:aws:iam::289186799422:role/LabRole  # Existing role with Lambda + Secrets perms
+      Timeout: 30                                 # Max execution time in seconds
+      MemorySize: 512                             # MB of memory allocated
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          NODE_ENV: production                    # Tells Express it's prod mode
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: function.zip                       # Must exist in bucket before deploy
+      Tags:
+        - Key: Name
+          Value: coffee-partners-api
+
+  # --------------------------------------------------------------------------
+  # Lambda Function URL (public HTTPS endpoint)
+  # --------------------------------------------------------------------------
+  # Built-in alternative to API Gateway — free beyond Lambda costs.
+  # Public (NONE auth) for dev/testing.
+
+  LambdaFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt CoffeePartnersLambda.Arn
+      AuthType: NONE                            # Public access (no IAM sigv4 required)
+      Cors:                                     # Browser CORS config (Lambda handles OPTIONS preflights auto)
+        AllowOrigins:
+          - '*'                                 # Wildcard for dev — allows any origin (EC2, local, etc.)
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE                            # No OPTIONS — Lambda auto-responds to preflights
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Requested-With
+          - X-Amz-Date
+          - X-Api-Key
+          - X-Amz-Security-Token
+        ExposeHeaders:
+          - Content-Type
+        MaxAge: 300                             # Cache preflight responses for 5 min
+
+  # --------------------------------------------------------------------------
+  # Permission for public invocation via Function URL
+  # --------------------------------------------------------------------------
+  # Required when AuthType is NONE — allows anyone (*) to call the URL.
+
+  LambdaFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CoffeePartnersLambda
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'                            # Public access
+      FunctionUrlAuthType: NONE
+
+# ============================================================================
+# OUTPUTS
+# ============================================================================
+# Values shown after deploy — copy/paste these for testing.
+
+Outputs:
+  FunctionUrl:
+    Description: The public HTTPS URL to call your API (use for curl/browser testing)
+    Value: !GetAtt LambdaFunctionUrl.FunctionUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionUrl'
+
+  LambdaFunctionArn:
+    Description: Full ARN of the deployed Lambda function
+    Value: !GetAtt CoffeePartnersLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+
+  LambdaFunctionName:
+    Description: Logical/physical name of the Lambda function
+    Value: !Ref CoffeePartnersLambda
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaName'
+
+  LambdaSecurityGroupId:
+    Description: ID of the security group attached to Lambda (useful for troubleshooting)
+    Value: !Ref LambdaSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaSecurityGroupId'
+
+  S3BucketNameOutput:
+    Description: S3 bucket used for code deployment
+    Value: !Ref S3BucketName
+    Export:
+      Name: !Sub '${AWS::StackName}-S3Bucket'

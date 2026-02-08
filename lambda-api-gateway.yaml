@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Lambda Function with API Gateway for Coffee Partners API'
+
+Parameters:
+  VpcId:
+    Type: String
+    Default: vpc-0cd0bf56666db3063
+    Description: VPC ID where Lambda will be deployed
+  
+  PrivateSubnet1:
+    Type: String
+    Default: subnet-0f86b1a837e9eb07e
+    Description: Private Subnet 1a ID
+  
+  PrivateSubnet2:
+    Type: String
+    Default: subnet-07b2bf9520f8c7781
+    Description: Private Subnet 1b ID
+  
+  SecretsManagerSecretArn:
+    Type: String
+    Default: arn:aws:secretsmanager:us-east-1:289186799422:secret:Mydbsecret-IlaeSs
+    Description: ARN of the Secrets Manager secret containing DB credentials
+
+Resources:
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CoffeePartnersLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref SecretsManagerSecretArn
+
+  # Lambda Security Group
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: CoffeePartnersLambdaSG
+      GroupDescription: Security group for Lambda function
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: coffee-partners-lambda-sg
+
+  # Update RDS Security Group to allow Lambda access
+  RDSSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !ImportValue students-rds-mariadb-stack-RDSSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  # Lambda Function
+  CoffeePartnersLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CoffeePartnersAPI
+      Runtime: nodejs18.x
+      Handler: lambda.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+      Environment:
+        Variables:
+          NODE_ENV: production
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            return {
+              statusCode: 200,
+              body: JSON.stringify({ message: 'Placeholder - deploy actual code' })
+            };
+          };
+      Tags:
+        - Key: Name
+          Value: coffee-partners-api
+
+  # HTTP API Gateway (v2)
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: CoffeePartnersAPI
+      ProtocolType: HTTP
+      Description: HTTP API for Coffee Partners application
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - '*'
+
+  # API Gateway Integration
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CoffeePartnersLambda.Arn
+      PayloadFormatVersion: '2.0'
+
+  # API Gateway Routes
+  HttpApiRouteRoot:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'ANY /'
+      Target: !Sub 'integrations/${HttpApiIntegration}'
+
+  HttpApiRouteProxy:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'ANY /{proxy+}'
+      Target: !Sub 'integrations/${HttpApiIntegration}'
+
+  # API Gateway Stage
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: '$default'
+      AutoDeploy: true
+
+  # Lambda Permission for API Gateway
+  LambdaApiGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CoffeePartnersLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*'
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !GetAtt HttpApi.ApiEndpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+  
+  LambdaFunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt CoffeePartnersLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+  
+  LambdaFunctionName:
+    Description: Lambda Function Name
+    Value: !Ref CoffeePartnersLambda
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaName'

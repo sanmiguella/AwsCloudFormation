@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "ALB 4XX alarm (>=5) with SNS email notification"
+
+Parameters:
+  AlbFullName:
+    Type: String
+    Description: "ALB full name, e.g. app/alb-web/1234567890abcdef"
+  TargetGroupFullName:
+    Type: String
+    Description: "Target group full name, e.g. targetgroup/alb-web-tg/abcdef1234567890"
+  AlarmEmail:
+    Type: String
+    Description: "Email address to receive alarm notifications"
+  Threshold:
+    Type: Number
+    Default: 5
+  PeriodSeconds:
+    Type: Number
+    Default: 60
+
+Resources:
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: "alb-4xx-alarm"
+
+  AlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  Alb4xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Target 4XX >= threshold in a single period"
+      Namespace: "AWS/ApplicationELB"
+      MetricName: "HTTPCode_Target_4XX_Count"
+      Statistic: "Sum"
+      Period: !Ref PeriodSeconds
+      EvaluationPeriods: 1
+      Threshold: !Ref Threshold
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      TreatMissingData: "notBreaching"
+      Dimensions:
+        - Name: "LoadBalancer"
+          Value: !Ref AlbFullName
+        - Name: "TargetGroup"
+          Value: !Ref TargetGroupFullName
+      AlarmActions:
+        - !Ref AlarmTopic
+
+Outputs:
+  SnsTopicArn:
+    Description: "SNS topic for ALB 4XX alarm"
+    Value: !Ref AlarmTopic
+  AlarmName:
+    Description: "CloudWatch alarm name"
+    Value: !Ref Alb4xxAlarm

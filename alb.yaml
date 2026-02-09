@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "ALB + ASG using existing VPC, subnets, and launch template"
+
+Parameters:
+  # Defaults are set to your provided IDs so you can deploy without overrides.
+  AlbName:
+    Type: String
+    Default: "alb-web"
+  VpcId:
+    Type: String
+    Default: "vpc-0cd0bf56666db3063"
+  PublicSubnet1:
+    Type: String
+    Default: "subnet-0c4e050257c697cca"
+  PublicSubnet2:
+    Type: String
+    Default: "subnet-082cb282600f19c18"
+  LaunchTemplateId:
+    Type: String
+    Default: "lt-089b5eeea9a77c3bc"
+  LaunchTemplateVersion:
+    Type: String
+    Default: "1"
+  TargetPort:
+    Type: Number
+    Default: 80
+  HealthCheckPath:
+    Type: String
+    Default: "/health"
+  MinSize:
+    Type: Number
+    Default: 1
+  MaxSize:
+    Type: Number
+    Default: 2
+  DesiredCapacity:
+    Type: Number
+    Default: 1
+
+Resources:
+  # Security group for the public ALB (HTTP 80 from the internet).
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "ALB security group"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AlbName}-sg"
+
+  ApplicationLoadBalancer:
+    # Internet-facing ALB in the public subnets.
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Ref AlbName
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Ref AlbName
+
+  AlbTargetGroup:
+    # Target group used by the listener and ASG.
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${AlbName}-tg"
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: !Ref TargetPort
+      TargetType: instance
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckPort: traffic-port
+      Matcher:
+        HttpCode: "200-399"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AlbName}-tg"
+
+  AlbListener:
+    # HTTP listener forwarding to the target group.
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AlbTargetGroup
+
+  WebAutoScalingGroup:
+    # ASG using your launch template, registered with the target group.
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplateId
+        Version: !Ref LaunchTemplateVersion
+      TargetGroupARNs:
+        - !Ref AlbTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 60
+      Tags:
+        - Key: Name
+          Value: "web-asg"
+          PropagateAtLaunch: true
+
+Outputs:
+  # ALB details to browse/test after stack creation.
+  AlbDnsName:
+    Description: "ALB DNS name"
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+  AlbArn:
+    Description: "ALB ARN"
+    Value: !Ref ApplicationLoadBalancer
+  TargetGroupArn:
+    Description: "Target group ARN"
+    Value: !Ref AlbTargetGroup
+  AutoScalingGroupName:
+    Description: "Auto Scaling Group name"
+    Value: !Ref WebAutoScalingGroup

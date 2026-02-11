@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS Restore Test from Snapshot - Safe Drill Instance
+
+Parameters:
+  SnapshotIdentifier:
+    Type: String
+    Default: test-snapshot-20260211-2250
+    Description: The manual snapshot to restore from
+
+Resources:
+  RestoreTestInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: students-drill-test
+      DBSnapshotIdentifier: !Ref SnapshotIdentifier
+      
+      # Explicitly match your original config (critical for connectivity)
+      DBInstanceClass: db.t3.micro
+      DBSubnetGroupName: students-rds-mariadb-stack-rdssubnetgroup-biuxiyshsmce  # Your exact subnet group → same private subnets
+      VPCSecurityGroups:
+        - sg-0f17bc63a39dffc5c
+        - sg-08a2ee70ad8184ee6
+        - sg-0f6336fc64b336c60  # Your 3 SGs → same inbound rules for EC2/Lambda
+      
+      MultiAZ: false
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 0  # No backups on temp instance
+      StorageType: gp2
+      AllocatedStorage: 20  # Matches snapshot; can increase but not decrease
+      
+      # Optional but good to match
+      Engine: mariadb  # Inherited anyway, but safe
+      EngineVersion: "10.6.19"
+      OptionGroupName: default:mariadb-10-6  # From your snapshot
+
+Outputs:
+  NewEndpoint:
+    Description: Endpoint of the restored test instance (update apps/secrets temporarily to test)
+    Value: !GetAtt RestoreTestInstance.Endpoint.Address
+  NewPort:
+    Value: !GetAtt RestoreTestInstance.Endpoint.Port
